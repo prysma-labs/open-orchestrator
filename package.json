@@ -1,0 +1,6 @@
+{
+  "name": "open-orchestrator", "private": true, "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": { "demo": "node src/cli.mjs compare --fixture --answers fixtures/answers.json --brief 'Create a poster for an offline creative night'", "start": "node src/cli.mjs", "test": "node --test" },
+  "dependencies": { "@earendil-works/pi-agent-core": "1.4.0", "@earendil-works/pi-ai": "1.4.0" }
+}
