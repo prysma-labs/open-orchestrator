@@ -1,0 +1,16 @@
+[Unit]
+Description=Research agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/research-agent
+EnvironmentFile=/opt/research-agent/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

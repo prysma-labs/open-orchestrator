@@ -1,8 +1,14 @@
 node_modules
 .next
-.data
+dist
 .env
 .env.local
+.env*.local
+agent/.env
+agent/node_modules
+agent/dist
+.secrets
 *.tsbuildinfo
-next-env.d.ts
-.worktrees
+.vercel
+.DS_Store
+.env*

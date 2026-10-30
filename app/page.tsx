@@ -1,5 +1,5 @@
-import { Workspace } from "@/components/workspace";
+import { ResearchApp } from "@/components/research-app";
 
 export default function Page() {
-  return <Workspace />;
+  return <ResearchApp />;
 }

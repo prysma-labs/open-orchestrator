@@ -1,10 +1,35 @@
-# Open Orchestrator
+# Research chat
 
-A public multi-agent workspace. Everyone who opens the app sees the same conversation, queue, and agent activity. There are no accounts.
+Four shared research conversations. The Next.js app on Vercel stores nothing about which VM it calls in the browser. Each agent is the same Node service on its own exe.dev VM. `AGENT_ID` picks the system prompt.
 
-A visitor sends a message to the Next.js API. The API stores the message and a queued request in Postgres. A coordinator running outside Vercel claims that request, drives [Pi](https://github.com/earendil-works/pi) over its RPC interface, and delegates work to scout, implementer, and reviewer processes. Viewers receive persisted changes and throttled drafts through Supabase Realtime.
+## Live services
 
-## Local development
+Supabase project `two-sigma` is in Prysma Labs (`us-west-1`). The four VMs are public on port 8000 and run the same service under systemd:
+
+- https://quant-researcher.exe.xyz
+- https://onchain-researcher.exe.xyz
+- https://fundamental-researcher.exe.xyz
+- https://market-researcher.exe.xyz
+
+The website is deployed at https://two-sigma-eight.vercel.app (Prysma Labs project `two-sigma`). Vercel Authentication is on, so opening it requires a Vercel account that can access the project. Do not commit `.env.local` or `.secrets/`.
+
+Model for all four agents: `deepseek/deepseek-v4.1-flash-1017`.
+
+## Secrets
+
+| Name | Where |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Vercel server env and each VM env file |
+| `AGENT_SHARED_SECRET` | Vercel server env and each VM env file |
+| `AGENT_URL_*` | Vercel server env only |
+| `OPENROUTER_API_KEY` | Each VM env file only |
+| `AGENT_ID`, `OPENROUTER_MODEL` | Each VM env file |
+
+Copy `.env.example` to `.env.local` for the Next.js app. Never commit `.env`, `.env.local`, `agent/.env`, or `.secrets/`. The secret key and the shared secret must not use a `NEXT_PUBLIC_` name.
+
+Tables have row level security and no policies, so the public Data API cannot read or write them. The servers use the secret key.
+
+## Local
 
 ```bash
 npm install
@@ -12,91 +37,25 @@ npm test
 npm run dev
 ```
 
-Open http://localhost:3000 in two windows. The local process uses embedded Postgres (PGlite) and a simulated agent driver, so it runs without Supabase or a model key. Set `SIM_STEP_MS=1200` to slow the simulated agents down.
-
-To drive the real Pi CLI instead:
-
 ```bash
-PI_DRIVER=rpc npm run dev
+cd agent
+npm install
+npm test
 ```
 
-Pi must be on `PATH` (`pi --version`). The coordinator starts one RPC process per task with `pi --mode rpc --no-session` and reads JSONL events from stdout. Thinking deltas are dropped. Tool commands are redacted before they are stored.
+## VMs
 
-## Production shape
-
-| Piece | Where it runs |
-| --- | --- |
-| Next.js UI and short API requests | Vercel |
-| Postgres, Realtime, RLS | Supabase |
-| Coordinator and Pi workers | exe.dev VM |
-
-Vercel does not run Pi. The VM does.
-
-### Supabase
-
-1. Create a project.
-2. Run `supabase/migrations/20261027143000_shared_workspace.sql` in the SQL editor, or with `supabase db push`.
-3. In Realtime settings, turn **Allow public access** off so the private channel policies apply.
-4. Copy the project URL, the anon or publishable key, and the service role key.
-
-The migration enables row level security, lets anonymous visitors read the workspace, and grants write functions only to `service_role`. Anonymous clients can listen to broadcast and track presence. They cannot publish agent events or insert rows.
-
-### Vercel
-
-Import this repository as a Next.js app. Set:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `IP_HASH_SALT`
-
-Do not set `PI_DRIVER` on Vercel. Leave the coordinator off the web deployment.
-
-### exe.dev
-
-Create a VM and install Node.js 22+ and Pi, then run the coordinator under systemd so it restarts after a crash or reboot. See `deploy/orchestrator.service`.
+Listen on `127.0.0.1:8000`. exe.dev proxies that port at `https://<name>.exe.xyz`. Make the share public so Vercel can call it, and keep `AGENT_SHARED_SECRET` on the request:
 
 ```bash
-ssh exe.dev new --name=orchestrator
-ssh orchestrator.exe.xyz
-# install Node.js and Pi, clone this repo to ~/orchestrator
-sudo cp deploy/orchestrator.service /etc/systemd/system/orchestrator.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now orchestrator
+ssh exe.dev share port <vm> 8000
+ssh exe.dev share set-public <vm>
 ```
 
-Put secrets in `/home/exedev/orchestrator.env` with mode `600`. The unit loads that file. `PI_DRIVER=rpc` is the production setting.
+Copy `agent/` to `/opt/research-agent`, write `/opt/research-agent/.env` as mode 600, then run `sh install.sh`. systemd unit: `agent/research-agent.service`. A restart marks that VM's running row failed.
 
-## Environment
+Suggested VM names: `quant-researcher`, `onchain-researcher`, `fundamental-researcher`, `market-researcher`.
 
-See `.env.example`. Local development needs none of them.
+## Vercel
 
-| Limit | Default |
-| --- | --- |
-| Message length | 8,000 characters |
-| Queue depth | 20 active requests |
-| Submissions | 8 per minute per hashed IP |
-| Workers | scout, implementer, and reviewer, at most 3 |
-| Active coordinator runs | 1 |
-| Model budget | $5, then new work is rejected |
-| Lease | 20 seconds, renewed by heartbeat |
-
-## Recovery rules
-
-- Claiming a request and publishing an event are idempotent.
-- A second coordinator cannot start a run while a lease is valid.
-- If the lease expires before a task has a side effect, that task is queued again on the same run.
-- If a task already wrote files or ran a shell command, it is marked interrupted and is not run again.
-- After three leases with no completed task, the request fails instead of looping.
-- Draft text is checkpointed a few times a second, not on every token. Event ids and sequence numbers keep late or duplicate updates from rendering twice or out of order.
-
-Coding tasks get a git worktree and branch per worker under the coordinator work directory. The coordinator merges the implementer branch. Reviewer and scout do not get write tools when Pi is in RPC mode.
-
-In local development, a message containing `[[fail:implementer]]` makes that worker fail. The dev-only **Simulate coordinator restart** control drops the lease so the next claim recovers the run.
-
-## Assumptions
-
-- One global workspace is enough. There is no per-user history.
-- The simulated driver is the default so the UI is usable before model credentials exist. Production on exe.dev should set `PI_DRIVER=rpc`.
-- Pi 1.4.0's RPC records (`prompt`, `agent_settled`, `tool_execution_*`, `get_session_stats`) are the integration surface.
-- This environment had no Docker daemon, so the migration is applied to embedded Postgres for local runs and is ready to apply to hosted Supabase. It was not applied to the existing Supabase projects in the account.
+Put the server variables in the project environment, then deploy this directory. The browser polls `/api/agents/<id>` every 1.5 seconds only while that agent's latest run is `running`.
